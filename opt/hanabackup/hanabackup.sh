@@ -1,18 +1,55 @@
 #/bin/bash
+#
+#
 [[ -f $HOME/.bashrc ]] && source $HOME/.bashrc -start "echo dummy"
 
-# Set default script's parameters
+#######################################
+# Runtime script's variables
 # ---
-declare HB_USERKEY="KEY4BACKUP"
-declare OV_BACKUP_TYPE="com"
-declare HB_BACKUP_TYPE="c"
-declare HB_ASYNC=0
-declare OV_DATABASES="%all"
-declare HB_DATABASES=""
-declare HB_FILE_PREFIX=""
-declare HB_FILE_SUFFIX=$(date +"%Y%m%d")
-declare HB_OPTIONS=""
-declare HB_COMMENT=""
+# Script PID
+declare HBS_MY_PID=$$
+
+# Script trace level
+declare HBS_TRACE_LEVEL=2
+
+# Script's exit code
+declare HBS_EXIT_CODE=0
+
+#######################################
+# Script's parameters
+# ---
+# User key for hdbsql
+declare HBS_USERKEY="KEY4BACKUP"
+
+# HANA backup's type (c|i|d)
+declare HBS_BACKUP_TYPE="c"
+
+# Backup starting mode (0 - sync, 1 - async)
+declare HBS_ASYNC=0
+
+# List of databases to backup
+declare HBS_DATABASES=""
+
+# HANA backup's file prefix
+declare HBS_FILE_PREFIX=""
+
+# HANA backup's file suffix
+declare HBS_FILE_SUFFIX=$(date +"%Y%m%d")
+
+# Additional HANA backup's options (if any)
+declare HBS_OPTIONS=""
+
+# HANA backup's comment
+declare HBS_COMMENT=""
+
+#######################################
+# Input options
+# ---
+# Input option value for HANA backup's type
+declare OPT_BACKUP_TYPE="com"
+
+# Input option value for databases list
+declare OPT_DATABASES="%all"
 
 # Show utility's help
 # ---
@@ -28,14 +65,14 @@ Description:
 
 Examples:
     # start HANA backup for all tenant
-    hanabackup.sh -dbs %all
+    hanabackup.sh --dbs %all
 
 Options:
     -U  <HANA User Key from secure user store>
-        The default user key is '${HB_USERKEY}'.
+        The default user key is '${HBS_USERKEY}'.
 
     --backup_type <type-of-backup>
-        The default backup type is '${OV_BACKUP_TYPE}'.
+        The default backup type is '${OPT_BACKUP_TYPE}'.
 
     --async, -A
         Switch asynchronous calling of the BACKUP DATA SQL-statement.
@@ -43,7 +80,7 @@ Options:
     --dbs <Comma-separated databases list>
         List of databases for backup.
         You can use the string '%all' for backup all of databases.
-        The default value is '${OV_DATABASES}'.
+        The default value is '${OPT_DATABASES}'.
 
     --help
         Display this help and exit.
@@ -53,13 +90,231 @@ Authors:
 EOF
 }
 
-exitWithError() {
-    echo "error: ${1}. Terminated with code ${2}..." >&2 ; exit $2
+#######################################
+# Write log text (info, error, warning...)
+# Globals:
+#   HBS_MY_PID
+# Arguments:
+#   $1: Type of information (I, -, W, E)
+#   $2: Text for writing
+# Outputs:
+#   Writes info to stdout/stderr
+#######################################
+logMessage() {
+    local log_type=$1
+    local my_pid=${HBS_MY_PID:-'-'}
+    local timestamp=$(date '+%F %X %Z')
+    local log_text=$2
+    local log_message=""
+    if [[ "$log_type" == "-" ]]; then
+        log_message="$log_text"
+    else
+        log_message="$log_type $my_pid $timestamp: $log_text"
+    fi
+    # TODO[mprusov]: Logging to file is not implemented
+    # [[ ! -z "$HBS_LOGFILE" ]] && echo "$__msg" >> $HBS_LOGFILE
+    if [[ "$log_type" == "E" || "$log_type" == "W" ]]; then
+        echo "$log_message" >&2
+    elif [[ "$log_type" == "I" || "$log_type" == "-" ]]; then
+        echo "$log_message" >&1
+    else
+        echo "$log_message" >&2
+    fi
 }
 
+#######################################
+# Log text info
+# Arguments:
+#   $1: Text for writing
+# Outputs:
+#   Writes info text to log
+#######################################
 logInfo() {
-    echo "info: $1"
+    logMessage 'I' "$1"
 }
+
+#######################################
+# Log debug text info
+# Arguments:
+#   $1: Text for writing
+# Outputs:
+#   Writes info text to log
+#######################################
+debugInfo() {
+    if [[ $HBS_TRACE_LEVEL > 1 ]]; then
+        logMessage 'I' "$1"
+    fi
+}
+
+#######################################
+# Log error text info
+# Arguments:
+#   $1: Text for writing
+# Outputs:
+#   Writes info text to log
+#######################################
+errorInfo() {
+    logMessage 'E' "$1"
+}
+
+#######################################
+# Log error info
+# Arguments:
+#   $1: Text for writing
+#   $2: Exit code (optional)
+# Outputs:
+#   Writes error text to log and exit
+#######################################
+exitWithError() {
+    HBS_EXIT_CODE=${2:-'1'}
+    errorInfo "${1}. Terminating with code ${HBS_EXIT_CODE}..."
+    exit $HBS_EXIT_CODE
+}
+
+#######################################
+# Construct hdbsql calling
+# ---
+HDBSQL="$DIR_EXECUTABLE/hdbsql -U ${HBS_USERKEY}"
+HDBSQL_BACKUP="$HDBSQL -E 1 -x -quiet -j -a"
+HDBSQL_QUERY="$HDBSQL -E 1 -x -quiet -j -a -C"
+
+# Options for hdbsql-command for "BACKUP DATA..." SQL-statemnt
+declare HBS_HDBSQL4B_OPT="-x -quiet -j -a"
+
+# hdbsql-command for "BACKUP DATA..." SQL-statemnt
+declare HBS_HDBSQL4B_CMD=""
+
+# Options for hdbsql-command for any query SQL-statemnt
+declare HBS_HDBSQL4Q_OPT="-x -quiet -j -a -C"
+
+# hdbsql-command for any query SQL-statemnt
+declare HBS_HDBSQL4Q_CMD=""
+
+# hdbsql result string
+declare HBS_HDBSQL_RESULT_STRING=""
+
+# hdbsql exit code
+declare HBS_HDBSQL_EXIT_CODE=0
+
+#######################################
+# Prepare command for calling of hdbsql
+# Globals:
+#   HBS_HDBSQL4B_CMD, HBS_HDBSQL4B_OPT
+#   HBS_HDBSQL4Q_CMD, HBS_HDBSQL4Q_OPT
+#   HBS_USERKEY
+# Arguments:
+#   none
+# Outputs:
+#   none
+#######################################
+prepareHDBSQLCommands() {
+    local SELECT_FROM_DUMMY_SQL="SELECT * FROM DUMMY"
+    # Construct and validate HBS_HDBSQL4B_CMD
+    HBS_HDBSQL4B_CMD="$DIR_EXECUTABLE/hdbsql -U $HBS_USERKEY $HBS_HDBSQL4B_OPT"
+    execHDBSQLBackup "$SELECT_FROM_DUMMY_SQL"
+    if [[ $? != 0 ]]; then
+        exitWithError "Validating of the hdbsql for backup is failed"
+    fi
+    # Construct and validate HBS_HDBSQL4Q_CMD
+    HBS_HDBSQL4Q_CMD="$DIR_EXECUTABLE/hdbsql -U $HBS_USERKEY $HBS_HDBSQL4Q_OPT"
+    execHDBSQLQuery "$SELECT_FROM_DUMMY_SQL"
+    if [[ $? != 0 ]]; then
+        exitWithError "Validating of the hdbsql for query is failed"
+    fi
+
+}
+
+#######################################
+# Execute SQL-command with hdbsql
+# Globals:
+#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE
+# Arguments:
+#   $1: command for hdbsql
+#   $2: sql text to execute
+#######################################
+execHDBSQLCommand() {
+    local hdbsql_cmd="$1"
+    local sql_text="$2"
+    debugInfo "Try to execute the SQL-command via hdbsql:"
+    debugInfo "  hdbsql command is: \"$hdbsql_cmd\""
+    debugInfo "  sql command is: \"$sql_text\""
+    HBS_HDBSQL_RESULT_STRING=$($hdbsql_cmd "$sql_text")
+    HBS_HDBSQL_EXIT_CODE=$?
+    if [[ $HBS_HDBSQL_EXIT_CODE != 0 ]]; then
+        errorInfo "Executing of the SQL-command is failed:"
+        errorInfo "  sql command is: \"$sql_text\""
+    else
+        debugInfo "Executing of the SQL-command is successfully with result:"
+        debugInfo "  result string is: \"$HBS_HDBSQL_RESULT_STRING\""
+    fi
+    return $HBS_HDBSQL_EXIT_CODE
+}
+
+#######################################
+# Execute backup command with hdbsql
+# Globals:
+#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE
+# Arguments:
+#   $1: sql text to execute
+#######################################
+execHDBSQLBackup() {
+    execHDBSQLCommand "$HBS_HDBSQL4B_CMD" "$1"
+    return $?
+}
+
+#######################################
+# Execute SQL-quert with hdbsql
+# Globals:
+#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE
+# Arguments:
+#   $1: sql text to execute
+#######################################
+execHDBSQLQuery() {
+    HBS_HDBSQL_RESULT_STRING=""
+    execHDBSQLCommand "$HBS_HDBSQL4Q_CMD" "$1"
+    return $?
+}
+
+#######################################
+# Parse backup mode ^w([S|M])?:([cCiIdD-]*)$
+# Globals:
+#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE
+# Arguments:
+#   $1: sql text to execute
+#######################################
+parseWeekBackupPlan() {
+    # Build full week backup plan
+    local week_plan="${BASH_REMATCH[2]}-------"
+    week_plan=$(echo ${week_plan:0:7} | tr '[:upper:]' '[:lower:]')
+    debugInfo "The week's backup plan is \"$week_plan\""
+    if [[ "${BASH_REMATCH[1]}" == "M" ]]; then
+        week_plan="${week_plan:6:1}${week_plan:0:6}"
+    fi
+
+    # Evalute day of week
+    local day_of_week=$(date +%u)
+    debugInfo "Today's day is \"$day_of_week\""
+
+    # Evalute HBS_BACKUP_TYPE
+    # ---
+    HBS_BACKUP_TYPE="${WBP:$DOW:1}"
+    debugInfo "Today's backup type is \"$HBS_BACKUP_TYPE\""
+}
+
+# Prepare list of all databases
+# ---
+prepareListBackupDatabases() {
+    GET_LIST_OF_DATABASES_SQL="SELECT DATABASE_NAME FROM M_DATABASES"
+    execHDBSQLQuery "$GET_LIST_OF_DATABASES_SQL"
+    if [[ $? != 0 ]]; then
+        exitWithError "Can't get list of databses to backup"
+    fi
+    HBS_DATABASES=$HBS_HDBSQL_RESULT_STRING
+}
+
+#######################################
+#### Main
+##
 
 # Parse command line options
 # ---
@@ -79,19 +334,19 @@ eval set -- "$OPTS"
 while true; do
   case "$1" in
     -U)
-        HB_USERKEY=$2
+        HBS_USERKEY=$2
         shift 2
         ;;
     --async|-A)
-        HB_ASYNC=1
+        HBS_ASYNC=1
         shift 1
         ;;
     --backup_type)
-        OV_BACKUP_TYPE=$2
+        OPT_BACKUP_TYPE=$2
         shift 2
         ;;
     --dbs)
-        OV_DATABASES=$2
+        OPT_DATABASES=$2
         shift 2
         ;;
     --)
@@ -105,104 +360,78 @@ while true; do
   esac
 done
 
-# Construst hdbsql calling
+
+# Prepare commands for calling hdbsql
 # ---
-HDBSQL="$DIR_EXECUTABLE/hdbsql -U ${HB_USERKEY}"
-HDBSQL_BACKUP="$HDBSQL -x -quiet -j -a"
-HDBSQL_QUERY="$HDBSQL -x -quiet -j -a -C"
+prepareHDBSQLCommands
 
-# Parse backup mode ^w[S|M]?:
+# Parse option value OPT_BACKUP_TYPE
 # ---
-parseWeekBackupPlan() {
-    # Build full week backup plan
-    # ---
-    WBP="${BASH_REMATCH[2]}-------"
-    WBP=$(echo ${WBP:0:7} | tr '[:upper:]' '[:lower:]')
-    [[ "${BASH_REMATCH[1]}" = "M" ]] && WBP="${WBP:6:1}${WBP:0:6}"
-
-    # Evalute day of week
-    # ---
-    DOW=$(date +%u)
-
-    # Evalute HB_BACKUP_TYPE
-    # ---
-    HB_BACKUP_TYPE="${WBP:$DOW:1}"
-}
-
-# Prepare list of all databases
-# ---
-prepareListAllDatabases() {
-    GET_LIST_OF_DATABASES_SQL="SELECT DATABASE_NAME FROM M_DATABASES"
-    logInfo "Try to execute the SQL-command with \"$HDBSQL_QUERY\":"
-    logInfo "    \"$GET_LIST_OF_DATABASES_SQL\""
-    GET_LIST_OF_DATABASES_RES=$($HDBSQL_QUERY "$GET_LIST_OF_DATABASES_SQL")
-    HB_DATABASES=$GET_LIST_OF_DATABASES_RES
-}
-
-# Parse option value OV_BACKUP_TYPE
-# ---
-if [[ "$OV_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
+if [[ "$OPT_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
     parseWeekBackupPlan
 else
-    case $(echo $OV_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
+    case $(echo $OPT_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
         c|com|d|dif|i|inc)
-            HB_BACKUP_TYPE=${OV_BACKUP_TYPE:0:1}
+            HBS_BACKUP_TYPE=${OPT_BACKUP_TYPE:0:1}
             ;;
         *)
-            exitWithError "Specified backup type '${OV_BACKUP_TYPE}' is unknown. You can use next backup types: com, dif, inc..." -1
+            exitWithError "Specified backup type '${OPT_BACKUP_TYPE}' is unknown. You can use next backup types: com, dif, inc..." -1
             ;;
     esac
 fi
 
-# Parse option value OV_DATABASES
+# Parse option value OPT_DATABASES
 # ---
-if [[  "$OV_DATABASES" == "%all" ]]; then
-    prepareListAllDatabases
+if [[  "$OPT_DATABASES" == "%all" ]]; then
+    prepareListBackupDatabases
 else
-    HB_DATABASES=$(echo $OV_DATABASES | tr ',' ' ')
+    HBS_DATABASES=$(echo $OPT_DATABASES | tr ',' ' ')
 fi
 
-# Evaluate HB_DELTA_SQL
+# Evaluate HBS_DELTA_SQL
 # ---
-case "$HB_BACKUP_TYPE" in
-    c)
-        HB_DELTA_SQL=""
-        ;;
+declare HBS_DELTA_SQL=""
+
+case "$HBS_BACKUP_TYPE" in
     d)
-        HB_DELTA_SQL="DIFFERENTIAL"
+        HBS_DELTA_SQL="DIFFERENTIAL"
         ;;
     i)
-        HB_DELTA_SQL="INCREMENTAL"
+        HBS_DELTA_SQL="INCREMENTAL"
         ;;
 esac
 
-# Evaluate HB_FILE_PREFIX_SQL
+# Evaluate HBS_FILE_PREFIX_SQL
 # ---
-if [[ -z "$HB_FILE_PREFIX" ]]; then
-    case "$HB_BACKUP_TYPE" in
+declare HBS_FILE_PREFIX_SQL=""
+if [[ -z "$HBS_FILE_PREFIX" ]]; then
+    case "$HBS_BACKUP_TYPE" in
         c)
-            HB_FILE_PREFIX="COMPLETE_DATA_BACKUP_"
+            HBS_FILE_PREFIX="COMPLETE_DATA_BACKUP_"
             ;;
         d)
-            HB_FILE_PREFIX="DIFFERENTIAL_DATA_BACKUP_"
+            HBS_FILE_PREFIX="DIFFERENTIAL_DATA_BACKUP_"
             ;;
         i)
-            HB_FILE_PREFIX="INCREMENTAL_DATA_BACKUP_"
+            HBS_FILE_PREFIX="INCREMENTAL_DATA_BACKUP_"
             ;;
     esac
 fi
-HB_FILE_PREFIX_SQL="$HB_FILE_PREFIX$HB_FILE_SUFFIX"
+HBS_FILE_PREFIX_SQL="$HBS_FILE_PREFIX$HBS_FILE_SUFFIX"
 
 #
 #
-[[ $HB_ASYNC == 1 ]] && HB_OPTIONS="$HB_OPTIONS ASYNCHRONOUS"
+[[ $HBS_ASYNC == 1 ]] && HBS_OPTIONS="$HBS_OPTIONS ASYNCHRONOUS"
 
 # Start backups for selected HANA databases
 # ---
-for HB_DATABASE in $HB_DATABASES; do
-    HB_COMMAND_SQL="BACKUP DATA $HB_DELTA_SQL FOR $HB_DATABASE USING FILE ( '$HB_FILE_PREFIX_SQL' )${HB_OPTIONS}${HB_COMMENT_SQL}"
-    logInfo "Try to execute the SQL-command with \"$HDBSQL_BACKUP\":"
-    logInfo "    \"$HB_COMMAND_SQL\""
-    $HDBSQL_BACKUP $HB_COMMAND_SQL
-    logInfo "The backup of the database \"$HB_DATABASE\" is complete."
+declare HBS_DATABASE=""
+for HBS_DATABASE in $HBS_DATABASES; do
+    HB_COMMAND_SQL="BACKUP DATA $HBS_DELTA_SQL FOR $HBS_DATABASE USING FILE ('$HBS_FILE_PREFIX_SQL')${HBS_OPTIONS}${HBS_COMMENT_SQL}"
+    logInfo "Try to start the backup of the database \"$HBS_DATABASE\"..."
+    execHDBSQLBackup "$HB_COMMAND_SQL"
+    if [[ $? != 0 ]]; then
+        exitWithError "Starting the backup of the database \"$HBS_DATABASE\" is failed"
+    fi
+    logInfo "Starting the backup of the database \"$HBS_DATABASE\" done successfully"
 done
