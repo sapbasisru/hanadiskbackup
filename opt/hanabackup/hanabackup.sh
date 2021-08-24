@@ -42,8 +42,17 @@ declare HBS_OPTIONS=""
 # HANA backup's comment
 declare HBS_COMMENT=""
 
+# Script's logfile directory
+declare HBS_LOG_DIR="/var/opt/hanabackup"
+
+# Script's logfile name
+declare HBS_LOG_NAME="hanabackuplog_$(date +"%Y-%m-%d").txt"
+
+# Script's logfile full name
+declare HBS_LOG_FULLNAME=""
+
 #######################################
-# Input options
+# Script's options
 # ---
 # Input option value for HANA backup's type
 declare OPT_BACKUP_TYPE="com"
@@ -62,13 +71,14 @@ Usage
     hanabackup.sh [OPTION...]
 
 Description:
+    TODO[mprusov]: Add desription of script.
 
 Examples:
     # start HANA backup for all tenant
     hanabackup.sh --dbs %all
 
 Options:
-    -U  <HANA User Key from secure user store>
+    -U <HANA User Key from secure user store>
         The default user key is '${HBS_USERKEY}'.
 
     --backup_type <type-of-backup>
@@ -111,8 +121,6 @@ logMessage() {
     else
         log_message="$log_type $my_pid $timestamp: $log_text"
     fi
-    # TODO[mprusov]: Logging to file is not implemented
-    # [[ ! -z "$HBS_LOGFILE" ]] && echo "$__msg" >> $HBS_LOGFILE
     if [[ "$log_type" == "E" || "$log_type" == "W" ]]; then
         echo "$log_message" >&2
     elif [[ "$log_type" == "I" || "$log_type" == "-" ]]; then
@@ -120,6 +128,7 @@ logMessage() {
     else
         echo "$log_message" >&2
     fi
+    [[ ! -z "$HBS_LOG_FULLNAME" ]] && echo "$log_message" >> $HBS_LOG_FULLNAME
 }
 
 #######################################
@@ -147,6 +156,17 @@ debugInfo() {
 }
 
 #######################################
+# Log warning text info
+# Arguments:
+#   $1: Text for writing
+# Outputs:
+#   Writes info text to log
+#######################################
+logWarning() {
+    logMessage 'W' "$1"
+}
+
+#######################################
 # Log error text info
 # Arguments:
 #   $1: Text for writing
@@ -169,6 +189,27 @@ exitWithError() {
     HBS_EXIT_CODE=${2:-'1'}
     errorInfo "${1}. Terminating with code ${HBS_EXIT_CODE}..."
     exit $HBS_EXIT_CODE
+}
+
+#######################################
+# Prepare logfile
+# Globals:
+#   HBS_LOG_DIR, HBS_LOG_NAME, HBS_LOG_FULLNAME
+# Arguments:
+#   $1: Type of information (I, -, W, E)
+#   $2: Text for writing
+# Outputs:
+#   Writes info to stdout/stderr
+#######################################
+prepareLogFile() {
+    local log_fullname="$HBS_LOG_DIR/$HBS_LOG_NAME"
+    touch $log_fullname 1>/dev/null 2>&1
+    if [[ $? != 0 ]]; then
+        logWarning "Log file \"$log_fullname\" is not acessible. Writing into logfile will skipped."
+    else
+        HBS_LOG_FULLNAME=$log_fullname
+        logInfo "I will write log info into logfile \"$HBS_LOG_FULLNAME\"."
+    fi
 }
 
 #######################################
@@ -221,7 +262,6 @@ prepareHDBSQLCommands() {
     if [[ $? != 0 ]]; then
         exitWithError "Validating of the hdbsql for query is failed"
     fi
-
 }
 
 #######################################
@@ -316,6 +356,10 @@ prepareListBackupDatabases() {
 #### Main
 ##
 
+# Prepare logging mechanism
+# ---
+prepareLogFile
+
 logInfo "HANA Backup script started"
 
 # Parse command line options
@@ -362,7 +406,6 @@ while true; do
   esac
 done
 
-
 # Prepare commands for calling hdbsql
 # ---
 prepareHDBSQLCommands
@@ -377,9 +420,16 @@ else
             HBS_BACKUP_TYPE=${OPT_BACKUP_TYPE:0:1}
             ;;
         *)
-            exitWithError "Specified backup type '${OPT_BACKUP_TYPE}' is unknown. You can use next backup types: com, dif, inc..." -1
+            exitWithError "Specified backup type '${OPT_BACKUP_TYPE}' is unknown. You can use next backup types: com, dif, inc..."
             ;;
     esac
+fi
+
+# Check HBS_BACKUP_TYPE for skipping real backup
+# ---
+if [[ "$HBS_BACKUP_TYPE" == "-" ]]; then
+    logInfo "Backup type is none. HANA backup script finished without actually performing backup."
+    exit 0
 fi
 
 # Parse option value OPT_DATABASES
@@ -393,13 +443,17 @@ fi
 # Evaluate HBS_DELTA_SQL
 # ---
 declare HBS_DELTA_SQL=""
-
 case "$HBS_BACKUP_TYPE" in
+    c)
+        ;;
     d)
         HBS_DELTA_SQL="DIFFERENTIAL"
         ;;
     i)
         HBS_DELTA_SQL="INCREMENTAL"
+        ;;
+    *)
+        exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
         ;;
 esac
 
@@ -417,6 +471,9 @@ if [[ -z "$HBS_FILE_PREFIX" ]]; then
         i)
             HBS_FILE_PREFIX="INCREMENTAL_DATA_BACKUP_"
             ;;
+        *)
+            exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
+            ;;
     esac
 fi
 HBS_FILE_PREFIX_SQL="$HBS_FILE_PREFIX$HBS_FILE_SUFFIX"
@@ -428,10 +485,11 @@ HBS_FILE_PREFIX_SQL="$HBS_FILE_PREFIX$HBS_FILE_SUFFIX"
 # Start backups for selected HANA databases
 # ---
 declare HBS_DATABASE=""
+declare HBS_BACKUP_COMMAND_SQL=""
 for HBS_DATABASE in $HBS_DATABASES; do
-    HB_COMMAND_SQL="BACKUP DATA $HBS_DELTA_SQL FOR $HBS_DATABASE USING FILE ('$HBS_FILE_PREFIX_SQL')${HBS_OPTIONS}${HBS_COMMENT_SQL}"
+    HBS_BACKUP_COMMAND_SQL="BACKUP DATA $HBS_DELTA_SQL FOR $HBS_DATABASE USING FILE ('$HBS_FILE_PREFIX_SQL')${HBS_OPTIONS}${HBS_COMMENT_SQL}"
     logInfo "Try to start the backup of the database \"$HBS_DATABASE\"..."
-    execHDBSQLBackup "$HB_COMMAND_SQL"
+    execHDBSQLBackup "$HBS_BACKUP_COMMAND_SQL"
     if [[ $? != 0 ]]; then
         exitWithError "Starting the backup of the database \"$HBS_DATABASE\" is failed"
     fi
