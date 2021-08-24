@@ -286,10 +286,10 @@ parseWeekBackupPlan() {
     # Build full week backup plan
     local week_plan="${BASH_REMATCH[2]}-------"
     week_plan=$(echo ${week_plan:0:7} | tr '[:upper:]' '[:lower:]')
-    debugInfo "The week's backup plan is \"$week_plan\""
     if [[ "${BASH_REMATCH[1]}" == "M" ]]; then
         week_plan="${week_plan:6:1}${week_plan:0:6}"
     fi
+    debugInfo "The week's backup (starting from sunday) plan is \"$week_plan\""
 
     # Evalute day of week
     local day_of_week=$(date +%u)
@@ -297,7 +297,7 @@ parseWeekBackupPlan() {
 
     # Evalute HBS_BACKUP_TYPE
     # ---
-    HBS_BACKUP_TYPE="${WBP:$DOW:1}"
+    HBS_BACKUP_TYPE="${week_plan:$day_of_week:1}"
     debugInfo "Today's backup type is \"$HBS_BACKUP_TYPE\""
 }
 
@@ -315,6 +315,8 @@ prepareListBackupDatabases() {
 #######################################
 #### Main
 ##
+
+logInfo "HANA Backup script started"
 
 # Parse command line options
 # ---
@@ -419,8 +421,8 @@ if [[ -z "$HBS_FILE_PREFIX" ]]; then
 fi
 HBS_FILE_PREFIX_SQL="$HBS_FILE_PREFIX$HBS_FILE_SUFFIX"
 
-#
-#
+# Add options ASYNCHRONOUS if set.
+# ---
 [[ $HBS_ASYNC == 1 ]] && HBS_OPTIONS="$HBS_OPTIONS ASYNCHRONOUS"
 
 # Start backups for selected HANA databases
@@ -435,3 +437,5 @@ for HBS_DATABASE in $HBS_DATABASES; do
     fi
     logInfo "Starting the backup of the database \"$HBS_DATABASE\" done successfully"
 done
+
+logInfo "HANA Backup script finished successfully"
