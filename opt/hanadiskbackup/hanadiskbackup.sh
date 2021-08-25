@@ -435,14 +435,6 @@ prepareBackupDataSQL() {
 #### Main
 ##
 
-# Prepare logging mechanism
-# ---
-prepareLogFile
-
-# Start work
-# ---
-logInfo "HANA Backup script started"
-
 # Parse command line options
 # ---
 getopt --test &>/dev/null
@@ -486,6 +478,14 @@ while true; do
         ;;
   esac
 done
+
+# Prepare logging mechanism
+# ---
+prepareLogFile
+
+# Start work
+# ---
+logInfo "HANA Backup script started"
 
 # Prepare commands for calling hdbsql
 # ---
