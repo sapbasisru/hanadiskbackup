@@ -25,22 +25,25 @@ declare HBS_USERKEY="KEY4BACKUP"
 declare HBS_BACKUP_TYPE="c"
 
 # Backup starting mode (0 - sync, 1 - async)
-declare HBS_ASYNC=0
+declare HBS_BACKUP_ASYNC=0
 
 # List of databases to backup
 declare HBS_DATABASES=""
 
-# HANA backup's file prefix
-declare HBS_FILE_PREFIX=""
+# HANA backup's file prefix, part1
+declare HBS_FILE_PREFIX_PART1=""
 
-# HANA backup's file suffix
-declare HBS_FILE_SUFFIX=$(date +"%Y%m%d")
+# HANA backup's file prefix, part2
+declare HBS_FILE_PREFIX_PART2=$(date +"%Y-%m-%d")
+
+# HANA backup's path
+declare HBS_BACKUP_PATH=""
 
 # Additional HANA backup's options (if any)
-declare HBS_OPTIONS=""
+declare HBS_BACKUP_OPTIONS=""
 
 # HANA backup's comment
-declare HBS_COMMENT=""
+declare HBS_BACKUP_COMMENT=""
 
 # Script's logfile directory
 declare HBS_LOG_DIR="/var/opt/hanabackup"
@@ -85,7 +88,7 @@ Options:
         The default backup type is '${OPT_BACKUP_TYPE}'.
 
     --async, -A
-        Switch asynchronous calling of the BACKUP DATA SQL-statement.
+        Switch asynchronous calling of the 'BACKUP DATA...' SQL-statement.
 
     --dbs <Comma-separated databases list>
         List of databases for backup.
@@ -322,7 +325,7 @@ execHDBSQLQuery() {
 # Arguments:
 #   $1: sql text to execute
 #######################################
-parseWeekBackupPlan() {
+parseWeeklyBackupPlan() {
     # Build full week backup plan
     local week_plan="${BASH_REMATCH[2]}-------"
     week_plan=$(echo ${week_plan:0:7} | tr '[:upper:]' '[:lower:]')
@@ -353,6 +356,82 @@ prepareListBackupDatabases() {
 }
 
 #######################################
+# Construct SQL-statement 'BACKUP DATA...' 
+# ---
+
+declare HBS_BACKUP_DELTA_SQLPART
+declare HBS_BACKUP_DEFINITION_SQLPART
+declare HBS_BACKUP_OPTION_SQLPART
+declare HBS_BACKUP_COMMENT_SQLPART
+declare HBS_BACKUP_DATA_SQL
+
+#######################################
+# Prepare parts for SQL-statement 'BACKUP DATA...' 
+# Globals:
+#   HBS_BACKUP_TYPE,
+#   HBS_FILE_PREFIX_PART1, HBS_FILE_PREFIX_PART2,
+#   HBS_BACKUP_PATH, HBS_BACKUP_ASYNC, HBS_BACKUP_COMMENT
+#   HBS_BACKUP_DELTA_SQLPART, HBS_BACKUP_DEFINITION_SQLPART, 
+#   HBS_BACKUP_OPTION_SQLPART, HBS_BACKUP_COMMENT_SQLPART
+# Arguments:
+#   none
+#######################################
+prepareBackupDataSQLTexts() {
+    # Evaluate HBS_BACKUP_DELTA_SQLPART
+    case "$HBS_BACKUP_TYPE" in
+        c)
+            HBS_BACKUP_DELTA_SQLPART=""
+            ;;
+        d)
+            HBS_BACKUP_DELTA_SQLPART="DIFFERENTIAL"
+            ;;
+        i)
+            HBS_BACKUP_DELTA_SQLPART="INCREMENTAL"
+            ;;
+        *)
+            exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
+            ;;
+    esac
+    
+    # Evaluate HBS_BACKUP_DEFINITION_SQLPART
+    local backup_file_prefix_sql="$HBS_FILE_PREFIX_PART2"
+    [[ ! -z "$HBS_FILE_PREFIX_PART1" ]]&& \
+        backup_file_prefix_sql="${HBS_FILE_PREFIX_PART1}_$backup_file_prefix_sql"
+    local backup_definition_file_sql="'$backup_file_prefix_sql'"
+    [[ ! -z "$HBS_BACKUP_PATH" ]] && \
+        backup_definition_file_sql="$HBS_BACKUP_PATH,'$backup_file_prefix_sql'"
+    HBS_BACKUP_DEFINITION_SQLPART="USING FILE ($backup_definition_file_sql)"
+
+    # Evaluate HBS_BACKUP_OPTION_SQLPART
+    HBS_BACKUP_OPTION_SQLPART="$HBS_BACKUP_OPTIONS"
+    [[ $HBS_BACKUP_ASYNC == 1 ]] && HBS_BACKUP_OPTION_SQLPART="$HBS_BACKUP_OPTION_SQLPART ASYNCHRONOUS"
+
+    # Evaluate HBS_BACKUP_COMMENT_SQLPART
+    [[ ! -z "$HBS_BACKUP_COMMENT" ]] && \
+        HBS_BACKUP_COMMENT_SQLPART="COMMENT '$HBS_BACKUP_COMMENT'"
+}
+
+#######################################
+# Prepare SQL-statement 'BACKUP DATA...' 
+# Globals:
+#   HBS_BACKUP_DATA_SQL
+#   HBS_BACKUP_DELTA_SQLPART, HBS_BACKUP_DEFINITION_SQLPART, 
+#   HBS_BACKUP_OPTION_SQLPART, HBS_BACKUP_COMMENT_SQLPART
+# Arguments:
+#   $1: Database Name
+#######################################
+prepareBackupDataSQL() {
+    HBS_BACKUP_DATA_SQL="BACKUP DATA"
+    [[ ! -z "$HBS_BACKUP_DELTA_SQLPART" ]] && \
+        HBS_BACKUP_DATA_SQL="$HBS_BACKUP_DATA_SQL $HBS_BACKUP_DELTA_SQLPART"
+    HBS_BACKUP_DATA_SQL="$HBS_BACKUP_DATA_SQL FOR $1 $HBS_BACKUP_DEFINITION_SQLPART"
+    [[ ! -z "$HBS_BACKUP_OPTION_SQLPART" ]] && \
+        HBS_BACKUP_DATA_SQL="$HBS_BACKUP_DATA_SQL $HBS_BACKUP_OPTION_SQLPART"
+    [[ ! -z "$HBS_BACKUP_COMMENT_SQLPART" ]] && \
+        HBS_BACKUP_DATA_SQL="$HBS_BACKUP_DATA_SQL $HBS_BACKUP_COMMENT_SQLPART"
+}
+
+#######################################
 #### Main
 ##
 
@@ -360,6 +439,8 @@ prepareListBackupDatabases() {
 # ---
 prepareLogFile
 
+# Start work
+# ---
 logInfo "HANA Backup script started"
 
 # Parse command line options
@@ -384,7 +465,7 @@ while true; do
         shift 2
         ;;
     --async|-A)
-        HBS_ASYNC=1
+        HBS_BACKUP_ASYNC=1
         shift 1
         ;;
     --backup_type)
@@ -413,7 +494,9 @@ prepareHDBSQLCommands
 # Parse option value OPT_BACKUP_TYPE
 # ---
 if [[ "$OPT_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
-    parseWeekBackupPlan
+    parseWeeklyBackupPlan
+    [[ -z "$HBS_FILE_PREFIX_PART1" ]] && HBS_FILE_PREFIX_PART1="WEEKLY"
+    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="Weekly backup copy with hanabackup script"
 else
     case $(echo $OPT_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
         c|com|d|dif|i|inc)
@@ -423,9 +506,11 @@ else
             exitWithError "Specified backup type '${OPT_BACKUP_TYPE}' is unknown. You can use next backup types: com, dif, inc..."
             ;;
     esac
+    [[ -z "$HBS_FILE_PREFIX_PART1" ]] && HBS_FILE_PREFIX_PART1="ONETIME"
+    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="One-time backup copy with hanabackup script"
 fi
 
-# Check HBS_BACKUP_TYPE for skipping real backup
+# Check HBS_BACKUP_TYPE for skipping mode
 # ---
 if [[ "$HBS_BACKUP_TYPE" == "-" ]]; then
     logInfo "Backup type is none. HANA backup script finished without actually performing backup."
@@ -440,60 +525,22 @@ else
     HBS_DATABASES=$(echo $OPT_DATABASES | tr ',' ' ')
 fi
 
-# Evaluate HBS_DELTA_SQL
-# ---
-declare HBS_DELTA_SQL=""
-case "$HBS_BACKUP_TYPE" in
-    c)
-        ;;
-    d)
-        HBS_DELTA_SQL="DIFFERENTIAL"
-        ;;
-    i)
-        HBS_DELTA_SQL="INCREMENTAL"
-        ;;
-    *)
-        exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
-        ;;
-esac
+# Prepare parts of SQL-statement 'BACKUP DATA'
+prepareBackupDataSQLTexts
 
-# Evaluate HBS_FILE_PREFIX_SQL
-# ---
-declare HBS_FILE_PREFIX_SQL=""
-if [[ -z "$HBS_FILE_PREFIX" ]]; then
-    case "$HBS_BACKUP_TYPE" in
-        c)
-            HBS_FILE_PREFIX="COMPLETE_DATA_BACKUP_"
-            ;;
-        d)
-            HBS_FILE_PREFIX="DIFFERENTIAL_DATA_BACKUP_"
-            ;;
-        i)
-            HBS_FILE_PREFIX="INCREMENTAL_DATA_BACKUP_"
-            ;;
-        *)
-            exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
-            ;;
-    esac
-fi
-HBS_FILE_PREFIX_SQL="$HBS_FILE_PREFIX$HBS_FILE_SUFFIX"
-
-# Add options ASYNCHRONOUS if set.
-# ---
-[[ $HBS_ASYNC == 1 ]] && HBS_OPTIONS="$HBS_OPTIONS ASYNCHRONOUS"
-
-# Start backups for selected HANA databases
+# Launch backups for selected HANA databases
 # ---
 declare HBS_DATABASE=""
-declare HBS_BACKUP_COMMAND_SQL=""
 for HBS_DATABASE in $HBS_DATABASES; do
-    HBS_BACKUP_COMMAND_SQL="BACKUP DATA $HBS_DELTA_SQL FOR $HBS_DATABASE USING FILE ('$HBS_FILE_PREFIX_SQL')${HBS_OPTIONS}${HBS_COMMENT_SQL}"
     logInfo "Try to start the backup of the database \"$HBS_DATABASE\"..."
-    execHDBSQLBackup "$HBS_BACKUP_COMMAND_SQL"
+    prepareBackupDataSQL $HBS_DATABASE
+    execHDBSQLBackup "$HBS_BACKUP_DATA_SQL"
     if [[ $? != 0 ]]; then
         exitWithError "Starting the backup of the database \"$HBS_DATABASE\" is failed"
     fi
     logInfo "Starting the backup of the database \"$HBS_DATABASE\" done successfully"
 done
 
+# Finish work
+# ---
 logInfo "HANA Backup script finished successfully"
