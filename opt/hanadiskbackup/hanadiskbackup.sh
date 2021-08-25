@@ -46,10 +46,10 @@ declare HBS_BACKUP_OPTIONS=""
 declare HBS_BACKUP_COMMENT=""
 
 # Script's logfile directory
-declare HBS_LOG_DIR="/var/opt/hanabackup"
+declare HBS_LOG_DIR="/var/opt/hanadiskbackup"
 
 # Script's logfile name
-declare HBS_LOG_NAME="hanabackuplog_$(date +"%Y-%m-%d").txt"
+declare HBS_LOG_NAME="hanadiskbackuplog_$(date +"%Y-%m-%d").txt"
 
 # Script's logfile full name
 declare HBS_LOG_FULLNAME=""
@@ -68,17 +68,17 @@ declare OPT_DATABASES="%all"
 showHelp() {
 cat<<EOF
 Name
-    hanabackup - HANA backup script.
+    hanadiskbackup - HANA disk backup script.
 
 Usage
-    hanabackup.sh [OPTION...]
+    hanadiskbackup.sh [OPTION...]
 
 Description:
     TODO[mprusov]: Add desription of script.
 
 Examples:
     # start HANA backup for all tenant
-    hanabackup.sh --dbs %all
+    hanadiskbackup.sh --dbs %all
 
 Options:
     -U <HANA User Key from secure user store>
@@ -496,7 +496,7 @@ prepareHDBSQLCommands
 if [[ "$OPT_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
     parseWeeklyBackupPlan
     [[ -z "$HBS_FILE_PREFIX_PART1" ]] && HBS_FILE_PREFIX_PART1="WEEKLY"
-    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="Weekly backup copy with hanabackup script"
+    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="Weekly backup copy with hanadiskbackup script"
 else
     case $(echo $OPT_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
         c|com|d|dif|i|inc)
@@ -507,7 +507,7 @@ else
             ;;
     esac
     [[ -z "$HBS_FILE_PREFIX_PART1" ]] && HBS_FILE_PREFIX_PART1="ONETIME"
-    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="One-time backup copy with hanabackup script"
+    [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="One-time backup copy with hanadiskbackup script"
 fi
 
 # Check HBS_BACKUP_TYPE for skipping mode
