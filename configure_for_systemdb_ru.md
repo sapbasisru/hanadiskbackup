@@ -1,8 +1,21 @@
 Конфигурирование системной БД HANA для работы скрипта hanadiskbackup
 ===
 
+Предполагается, что инсталляция скрипта `hanadiskbackup` уже выполнена с помощью командного файла
+[install_ru.md](install_ru.md).
+
 >[!NOTE]
 >:point_up: Команды выполняются на сервере HANA от имени учетной записи `<hana_sid>adm`.
+
+Подготовить окружение для выполнения команд
+---
+
+Определить папки скрипта `hanadiskbackup`:
+
+```bash
+HB_SCRIPT_DIR=/opt/hanadiskbackup
+HB_LOG_DIR=/var/opt/hanadiskbackup
+```
 
 Создать пользователя резервного копирования HANA
 ---
@@ -49,6 +62,8 @@ $HDBSQL "ALTER USER $HANABACKUP_USER_NAME DISABLE PASSWORD LIFETIME"
 $HDBSQL "GRANT CATALOG READ TO $HANABACKUP_USER_NAME"
 $HDBSQL "GRANT BACKUP OPERATOR to $HANABACKUP_USER_NAME"
 $HDBSQL "GRANT BACKUP ADMIN to $HANABACKUP_USER_NAME"
+$HDBSQL "GRANT DATABASE BACKUP OPERATOR to $HANABACKUP_USER_NAME"
+$HDBSQL "GRANT DATABASE BACKUP ADMIN to $HANABACKUP_USER_NAME"
 ```
 
 Ниже приведены команды, предоставляющие техническому пользователю дополнительные полномочия,
@@ -98,6 +113,45 @@ hdbuserstore LIST KEY4BACKUP
 ${DIR_EXECUTABLE}/hdbsql -j -U KEY4BACKUP "SELECT * FROM DUMMY"
 ```
 
-Проверить работу скрипта `hanadiskbackup`:
+Проверить работу скрипта `hanadiskbackup` с помощью следующей команды
+(команда не выполняет реального создания резервной копии БД):
 
-/opt/hanadiskbackup/hanadiskbackup.sh --dbs SYSTEMDB --backup_type '-'
+```bash
+$HB_SCRIPT_DIR/hanadiskbackup.sh --dbs SYSTEMDB --backup_type '-'
+```
+
+Запустить сессию резервного копирования
+---
+
+Запустить реальную сессию резервного копирования системной БД и всех прикладных тенантов HANA:
+
+```bash
+$HB_SCRIPT_DIR/hanadiskbackup.sh
+```
+
+Запланировать запуск скрипта через crontab
+---
+
+Скрипт `hanadiskbackup` может быть запущен в режиме недельного расписания
+с помощью специального формата параметра `--backup_type`.
+Например,
+для создания полной резервной копии  один раз в неделю в воскресенье и
+создания дифференциальных резервных копий в другие дни необходимо указать
+`wM:ddddddc`
+
+Добавить в планировщик ОС `crontab` ежедневный запуск скрипта `hanadiskbackup` в два часа ночи в режиме недельного расписания:
+
+```bash
+( crontab -l ; \
+cat<<EOF
+# Start HANA disk backup for HANA MDC $SAPSYSTEMNAME 
+0 2 * * * $HB_SCRIPT_DIR/hanadiskbackup.sh --backup_type w:cdddddd > $HB_LOG_DIR/hanadiskbackupcron_${SAPSYSTEMNAME}.txt 2>&1
+EOF
+) | crontab -
+```
+
+Визуально проверить расписание планировщика `crontab`:
+
+```bash
+crontab -l
+```

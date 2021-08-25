@@ -49,7 +49,7 @@ declare HBS_BACKUP_COMMENT=""
 declare HBS_LOG_DIR="/var/opt/hanadiskbackup"
 
 # Script's logfile name
-declare HBS_LOG_NAME="hanadiskbackuplog_$(date +"%Y-%m-%d").txt"
+declare HBS_LOG_NAME="hanadiskbackuplog_${SAPSYSTEMNAME}_$(date +"%Y-%m-%d").txt"
 
 # Script's logfile full name
 declare HBS_LOG_FULLNAME=""
