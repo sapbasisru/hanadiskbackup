@@ -25,7 +25,7 @@ HB_REPO_DIR=/stage/sapbasisru.github/hanadiskbackup.git
 с GitHub:
 
 ```bash
-cd $HB_REPO_DIR && git pull origin master
+( cd $HB_REPO_DIR && git pull origin main )
 ```
 
 Обновить скрипт

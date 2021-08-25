@@ -499,7 +499,7 @@ if [[ "$OPT_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
     [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="Weekly backup copy with hanadiskbackup script"
 else
     case $(echo $OPT_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
-        c|com|d|dif|i|inc)
+        c|com|d|dif|i|inc|-)
             HBS_BACKUP_TYPE=${OPT_BACKUP_TYPE:0:1}
             ;;
         *)
