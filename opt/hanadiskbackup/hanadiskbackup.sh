@@ -380,20 +380,8 @@ declare HBS_BACKUP_DATA_SQL
 #######################################
 prepareBackupDataSQLTexts() {
     # Evaluate HBS_BACKUP_DELTA_SQLPART
-    case "$HBS_BACKUP_TYPE" in
-        c)
-            HBS_BACKUP_DELTA_SQLPART=""
-            ;;
-        d)
-            HBS_BACKUP_DELTA_SQLPART="DIFFERENTIAL"
-            ;;
-        i)
-            HBS_BACKUP_DELTA_SQLPART="INCREMENTAL"
-            ;;
-        *)
-            exitWithError "Internal error. Unknown backup type '${HBS_BACKUP_TYPE}'."
-            ;;
-    esac
+    declare -A delta_text='([c]="" [d]="DIFFERENTIAL" [i]="INCREMENTAL")'
+    HBS_BACKUP_DELTA_SQLPART=${delta_text[$HBS_BACKUP_TYPE]}
     
     # Evaluate HBS_BACKUP_DEFINITION_SQLPART
     local backup_file_prefix_sql="$HBS_FILE_PREFIX_PART2"
