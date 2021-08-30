@@ -319,23 +319,25 @@ execHDBSQLQuery() {
 }
 
 #######################################
-# Parse backup mode ^w([S|M])?:([cCiIdD-]*)$
+# Parse backup mode ^w([s|m])?:([cid-]*)$
 # Globals:
-#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE
+#   HBS_HDBSQL_RESULT_STRING, HBS_HDBSQL_EXIT_CODE,
+#   HBS_BACKUP_TYPE
 # Arguments:
 #   $1: sql text to execute
 #######################################
 parseWeeklyBackupPlan() {
     # Build full week backup plan
     local week_plan="${BASH_REMATCH[2]}-------"
-    week_plan=$(echo ${week_plan:0:7} | tr '[:upper:]' '[:lower:]')
-    if [[ "${BASH_REMATCH[1]}" == "M" ]]; then
-        week_plan="${week_plan:6:1}${week_plan:0:6}"
+    if [[ "${BASH_REMATCH[1]}" == "s" ]]; then
+        week_plan="${week_plan:1:6}${week_plan:0:1}"
+    else
+        week_plan="${week_plan:0:7}"
     fi
-    debugInfo "The week's backup (starting from sunday) plan is \"$week_plan\""
+    debugInfo "The week's backup (starting from monday) plan is \"$week_plan\""
 
     # Evalute day of week
-    local day_of_week=$(date +%u)
+    local day_of_week=$[$(date +%u)-1]
     debugInfo "Today's day is \"$day_of_week\""
 
     # Evalute HBS_BACKUP_TYPE
@@ -461,7 +463,7 @@ while true; do
         shift 1
         ;;
     --backup_type)
-        OPT_BACKUP_TYPE=$2
+        OPT_BACKUP_TYPE=$(echo $2 | tr '[:upper:]' '[:lower:]')
         shift 2
         ;;
     --dbs)
@@ -493,12 +495,12 @@ prepareHDBSQLCommands
 
 # Parse option value OPT_BACKUP_TYPE
 # ---
-if [[ "$OPT_BACKUP_TYPE" =~ ^w([S|M])?:([cCiIdD-]*)$ ]]; then
+if [[ "$OPT_BACKUP_TYPE" =~ ^w([s|m])?:([cid-]*)$ ]]; then
     parseWeeklyBackupPlan
     [[ -z "$HBS_FILE_PREFIX_PART1" ]] && HBS_FILE_PREFIX_PART1="WEEKLY"
     [[ -z "$HBS_BACKUP_COMMENT" ]] && HBS_BACKUP_COMMENT="Weekly backup copy with hanadiskbackup script"
 else
-    case $(echo $OPT_BACKUP_TYPE | tr '[:upper:]' '[:lower:]') in
+    case $OPT_BACKUP_TYPE in
         c|com|d|dif|i|inc|-)
             HBS_BACKUP_TYPE=${OPT_BACKUP_TYPE:0:1}
             ;;
