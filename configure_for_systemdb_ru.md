@@ -26,9 +26,15 @@ HB_LOG_DIR=/var/opt/hanadiskbackup
 
 Далее используются переменные `HANABACKUP_USER_NAME` и `HANABACKUP_USER_PWD`
 для обозначения имени учетной записи технического пользователя HANA и его пароля.
+Установить имя технического пользователя:
 
 ```bash
 HANABACKUP_USER_NAME=TCU4BACKUP
+```
+
+Установить пароль технического пользователя:
+
+```bash
 HANABACKUP_USER_PWD=<Пароль пользователя TCU4BACKUP>
 ```
 
@@ -39,10 +45,15 @@ HANABACKUP_USER_PWD=<Пароль пользователя TCU4BACKUP>
 Имя административной учетной записи будут обозначаться с помощью переменных
 `SYSTEMDB_ADM_USER_NAME` и `SYSTEMDB_ADM_USER_PWD` соответственно.
 
-Определить административную учетную запись и пароль в системной БД:
+Установить имя административной учетной записи в системной БД:
 
 ```bash
 SYSTEMDB_ADM_USER_NAME=SYSTEM
+```
+
+Установить пароль административной учетной записи:
+
+```bash
 SYSTEMDB_ADM_USER_PWD=<Пароль пользователя SYSTEM>
 ```
 
@@ -67,7 +78,7 @@ $HDBSQL "GRANT DATABASE BACKUP ADMIN to $HANABACKUP_USER_NAME"
 ```
 
 Ниже приведены команды, предоставляющие техническому пользователю дополнительные полномочия,
-позволяющие выполнять останов/запуск и восстановления прикладных тенантов HANA.
+позволяющие выполнять останов/запуск и восстановление прикладных тенантов HANA.
 Эти полномочия **не требуются** для работы скрипта `hanadiskbackup`.
 
 ```bash
@@ -89,14 +100,14 @@ $HDBSQL "GRANT DATABASE RECOVERY OPERATOR TO $HANABACKUP_USER_NAME"
 
 ```bash
 HANA_NAMESERVER_PORT=$($HDBSQL -C -a -x "SELECT SQL_PORT FROM SYS_DATABASES.M_SERVICES WHERE DATABASE_NAME='SYSTEMDB' AND SERVICE_NAME='nameserver' AND COORDINATOR_TYPE= 'MASTER'")
-echo HANA_NAMESERVER_PORT is "$HANA_NAMESERVER_PORT"
+echo "`tput setaf 2`HANA nameserver port is`tput sgr0` : [`tput setaf 1`$HANA_NAMESERVER_PORT`tput sgr0`]"
 ```
 
 Определить и визуально проверить хост сервера HANA:
 
 ```bash
 HANA_HOST=$(basename $SAP_RETRIEVAL_PATH)
-echo HANA_HOST is "$HANA_HOST"
+echo "`tput setaf 2`HANA host is`tput sgr0` : [`tput setaf 1`$HANA_HOST`tput sgr0`]"
 ```
 
 Создать ключ для технической учетной записи пользователя `HANABACKUP_USER_NAME` в *HANA Secure User Store*:
@@ -129,7 +140,7 @@ $HB_SCRIPT_DIR/hanadiskbackup.sh --dbs SYSTEMDB --backup_type '-'
 $HB_SCRIPT_DIR/hanadiskbackup.sh
 ```
 
-Запланировать запуск скрипта через crontab
+Запланировать запуск скрипта через *crontab*
 ---
 
 Скрипт `hanadiskbackup` может быть запущен в режиме недельного расписания
@@ -137,7 +148,7 @@ $HB_SCRIPT_DIR/hanadiskbackup.sh
 Например,
 для создания полной резервной копии  один раз в неделю в воскресенье и
 создания дифференциальных резервных копий в другие дни необходимо указать
-`wM:ddddddc`
+`wM:ddddddc`.
 
 Добавить в планировщик ОС `crontab` ежедневный запуск скрипта `hanadiskbackup` в два часа ночи в режиме недельного расписания:
 
@@ -154,4 +165,16 @@ EOF
 
 ```bash
 crontab -l
+```
+
+Решение технических проблем
+---
+
+### Анализ ошибки HANA 258: insufficient privilege
+
+Если при запуске SQL-команды возникает ошибка *258: insufficient privilege...*,
+детали ошибки можно получить с помощью SQL-команды *CALL SYS.GET_INSUFFICIENT_PRIVILEGE_ERROR_DETAILS ('\<guid\>', ?)":
+
+```bash
+$HDBSQL "CALL SYS.GET_INSUFFICIENT_PRIVILEGE_ERROR_DETAILS ('<guid>', ?)"
 ```
