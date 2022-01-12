@@ -1,2 +1,2 @@
-# hanabackup
+# hanadiskbackup
 HANA disk backup script.
