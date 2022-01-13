@@ -3,6 +3,9 @@
 #
 [[ -f $HOME/.bashrc ]] && source $HOME/.bashrc -start "echo dummy"
 
+declare HBS_SCRIPT_NAME="HANA Disk Backup Script"
+declare HBS_SCRIPT_VERSION="0.1.1"
+
 #######################################
 # Runtime script's variables
 # ---
@@ -63,18 +66,35 @@ declare OPT_BACKUP_TYPE="com"
 # Input option value for databases list
 declare OPT_DATABASES="%all"
 
-# Show utility's help
-# ---
+#######################################
+# Show help information
+# Globals:
+#   HBS_SCRIPT_NAME, HBS_SCRIPT_VERSION
+# Outputs:
+#   Writes info to stdout
+#######################################
+showVersion() {
+cat<<EOF
+$HBS_SCRIPT_NAME $HBS_SCRIPT_VERSION
+EOF
+}
+
+#######################################
+# Show help information
+# Globals:
+#   HHBS_SCRIPT_DESCRIPTION
+# Outputs:
+#   Writes info to stdout
+#######################################
 showHelp() {
 cat<<EOF
-Name
-    hanadiskbackup - HANA disk backup script.
+$HBS_SCRIPT_NAME $HBS_SCRIPT_VERSION
 
 Usage
     hanadiskbackup.sh [OPTION...]
 
 Description:
-    TODO[mprusov]: Add desription of script.
+    TODO[mprusov]: Add desription of the script.
 
 Examples:
     # start HANA backup for all tenant
@@ -94,6 +114,9 @@ Options:
         List of databases for backup.
         You can use the string '%all' for backup all of databases.
         The default value is '${OPT_DATABASES}'.
+
+    --version
+        Show version information and exit.
 
     --help
         Display this help and exit.
@@ -181,7 +204,7 @@ errorInfo() {
 }
 
 #######################################
-# Log error info
+# Terminate the script with error info
 # Arguments:
 #   $1: Text for writing
 #   $2: Exit code (optional)
@@ -192,6 +215,18 @@ exitWithError() {
     HBS_EXIT_CODE=${2:-'1'}
     errorInfo "${1}. Terminating with code ${HBS_EXIT_CODE}..."
     exit $HBS_EXIT_CODE
+}
+
+#######################################
+# Finish the script with info
+# Arguments:
+#   $1: Text for writing
+# Outputs:
+#   Writes info text to log and exit
+#######################################
+exitWithInfo() {
+    logInfo "${1}"
+    exit 0
 }
 
 #######################################
@@ -433,7 +468,7 @@ if [[ $? -ne 4 ]]; then
 fi
 
 OPTS_SHORT="U:,A"
-OPTS_LONG="help,async,backup_type:,dbs:"
+OPTS_LONG="help,version,async,backup_type:,dbs:"
 OPTS=$(getopt -s bash -o '' --options $OPTS_SHORT --longoptions $OPTS_LONG -n "$0" -- "$@")
 if [[ $? -ne 0 ]] ; then
     exitWithError "Failed parsing options" -2
@@ -458,13 +493,17 @@ while true; do
         OPT_DATABASES=$2
         shift 2
         ;;
+    --version)
+        showVersion
+        exit 0
+        ;;
+    --help)
+        showHelp
+        exit 0
+        ;;
     --)
         shift
         break
-        ;;
-    *)
-        showHelp
-        exit 0
         ;;
   esac
 done
@@ -475,7 +514,7 @@ prepareLogFile
 
 # Start work
 # ---
-logInfo "HANA Backup script started"
+logInfo "$HBS_SCRIPT_NAME ($HBS_SCRIPT_VERSION) started"
 
 # Prepare commands for calling hdbsql
 # ---
@@ -503,8 +542,7 @@ fi
 # Check HBS_BACKUP_TYPE for skipping mode
 # ---
 if [[ "$HBS_BACKUP_TYPE" == "-" ]]; then
-    logInfo "Backup type is none. HANA backup script finished without actually performing backup."
-    exit 0
+    exitWithInfo "Backup type is none. $HBS_SCRIPT_NAME finished without actually performing backup."
 fi
 
 # Parse option value OPT_DATABASES
@@ -533,4 +571,4 @@ done
 
 # Finish work
 # ---
-logInfo "HANA Backup script finished successfully"
+exitWithInfo "$HBS_SCRIPT_NAME finished successfully"
