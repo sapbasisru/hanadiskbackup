@@ -4,7 +4,7 @@
 [[ -f $HOME/.bashrc ]] && source $HOME/.bashrc -start "echo dummy"
 
 declare HBS_SCRIPT_NAME="HANA Disk Backup Script"
-declare HBS_SCRIPT_VERSION="0.1.1"
+declare HBS_SCRIPT_VERSION="0.1.2"
 
 #######################################
 # Runtime script's variables
@@ -322,8 +322,12 @@ execHDBSQLCommand() {
         errorInfo "Executing of the SQL-command is failed:"
         errorInfo "  sql command is: \"$sql_text\""
     else
-        debugInfo "Executing of the SQL-command is successfully with result:"
-        debugInfo "  result string is: \"$HBS_HDBSQL_RESULT_STRING\""
+        if [[ -z "$HBS_HDBSQL_RESULT_STRING" ]]; then
+            debugInfo "Executing of the SQL-command is successfully with no result string."
+        else
+            debugInfo "Executing of the SQL-command is successfully with result:"
+            debugInfo "  result string is: \"$HBS_HDBSQL_RESULT_STRING\""
+        fi
     fi
     return $HBS_HDBSQL_EXIT_CODE
 }
