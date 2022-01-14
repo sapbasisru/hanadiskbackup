@@ -57,6 +57,18 @@ declare HBS_LOG_NAME="hanadiskbackuplog_${SAPSYSTEMNAME}_$(date +"%Y-%m-%d").txt
 # Script's logfile full name
 declare HBS_LOG_FULLNAME=""
 
+# Mail notification mode:
+# - 0: none
+# - 1: mail if error
+# - 2: mail anytime
+declare HBS_MAIL_MODE=0
+
+# Mail notification sender (from)
+declare HBS_MAILFROM=""
+
+# Mail notification recipients (to)
+declare HBS_MAILTO=""
+
 #######################################
 # Script's options
 # ---
@@ -65,6 +77,9 @@ declare OPT_BACKUP_TYPE="com"
 
 # Input option value for databases list
 declare OPT_DATABASES="%all"
+
+# Mail notification mode
+declare OPT_MAIL_MODE="0"
 
 #######################################
 # Show help information
@@ -101,19 +116,38 @@ Examples:
     hanadiskbackup.sh --dbs %all
 
 Options:
-    -U <HANA User Key from secure user store>
-        The default user key is '${HBS_USERKEY}'.
+    --async, -A
+        Switch to asynchronous calling of the 'BACKUP DATA...' SQL-statement.
 
     --backup_type <type-of-backup>
+        Set session backup type.
         The default backup type is '${OPT_BACKUP_TYPE}'.
-
-    --async, -A
-        Switch asynchronous calling of the 'BACKUP DATA...' SQL-statement.
 
     --dbs <Comma-separated databases list>
         List of databases for backup.
         You can use the string '%all' for backup all of databases.
         The default value is '${OPT_DATABASES}'.
+
+    --mail <mail mode>
+        Set mail notification's mode.
+        Possible values:
+        *   0 - none, 
+        *   1 - mail if error
+        *   2 - mail anytime
+        The default notofication mode is 0.
+        Script uses the utility sendmail for mailing.
+
+    --mailfrom <sender>
+        Use <sender> for field "from" in the mail notification.
+        Example: "HANA Disk Backup Script<nobody@nobody.com>".
+        Default value: none.
+
+    --mailto <recipient(s)>
+        Use <recipient(s)> for field "to" in the mail notification.
+        Default value: none.
+
+    -U <HANA User Key from secure user store>
+        The default user key is '${HBS_USERKEY}'.
 
     --version
         Show version information and exit.
@@ -214,6 +248,7 @@ errorInfo() {
 exitWithError() {
     HBS_EXIT_CODE=${2:-'1'}
     errorInfo "${1}. Terminating with code ${HBS_EXIT_CODE}..."
+    processMailNotification
     exit $HBS_EXIT_CODE
 }
 
@@ -226,6 +261,7 @@ exitWithError() {
 #######################################
 exitWithInfo() {
     logInfo "${1}"
+    processMailNotification
     exit 0
 }
 
@@ -461,6 +497,86 @@ prepareBackupDataSQL() {
 }
 
 #######################################
+# Prepare mail notification engine 
+# Globals:
+#   OPT_MAIL_MODE, 
+#   HBS_MAIL_MODE, HBS_MAILFROM, HBS_MAILTO
+# Arguments:
+#   none
+#######################################
+prepareMailMode() {
+    HBS_MAIL_MODE=0
+    [[ ! "$OPT_MAIL_MODE" =~ (^[012]$) ]] && \
+        exitWithError "Unknown mail notification mode \"$OPT_MAIL_MODE\""
+    
+    HBS_MAIL_MODE=$OPT_MAIL_MODE
+    [[ $HBS_MAIL_MODE -eq 0 ]] && return
+
+    [[ -z "$HBS_MAILFROM" ]] && \
+        exitWithError "The e-mail sender is not specified. Use the option \"mailfrom\""
+
+    [[ -z "$HBS_MAILTO" ]] && \
+        exitWithError "The e-mail recipient(s) is not specified. Use the option \"mailto\""
+}
+
+#######################################
+# Process mail notofocation
+# Globals:
+#   HBS_MAIL_MODE, HBS_MAILFROM, HBS_MAILTO
+#   HBS_LOG_DIR, HBS_LOG_NAME
+# Arguments:
+#   none
+#######################################
+processMailNotification() {
+    [[ $HBS_MAIL_MODE -eq 0 || $HBS_MAIL_MODE -eq 1 && HBS_EXIT_CODE -eq 0 ]] && return
+
+    # Prepare mail file
+    # ---
+    local log_fullname="$HBS_LOG_DIR/$HBS_LOG_NAME"
+    local mail_fullname="$HBS_LOG_DIR/$HBS_LOG_NAME.eml"
+    local mail_subject=""
+    local mail_text=""
+
+    if [[ HBS_EXIT_CODE -eq 0 ]]; then
+        mail_subject="HANA Disk Backup Script finished successfully [$(date +"%Y-%m-%d %T")]"
+        mail_text="HANA Disk Backup Script finished successfully.
+Log file $log_fullname is attached."
+    else
+        mail_subject="HANA Disk Backup Script failed [$(date +"%Y-%m-%d %T")]"
+        mail_text="HANA Disk Backup Script finished with error ($HBS_EXIT_CODE).
+Log file $log_fullname is attached."
+    fi
+
+cat>$mail_fullname<<EOF
+From: $HBS_MAILFROM
+To: $HBS_MAILTO
+Subject: $mail_subject
+Mime-Version: 1.0
+Content-Type: multipart/mixed; boundary="28011973"
+
+--28011973
+Content-Type: text/plain; charset="US-ASCII"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: inline
+
+$mail_text
+
+--28011973
+Content-Type: application;
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="$HBS_LOG_NAME"
+
+$(base64 $log_fullname)
+
+--28011973
+EOF
+
+    # Send mail file
+    # ---
+    /usr/sbin/sendmail -t < $mail_fullname
+}
+
+#######################################
 #### Main
 ##
 
@@ -472,7 +588,7 @@ if [[ $? -ne 4 ]]; then
 fi
 
 OPTS_SHORT="U:,A"
-OPTS_LONG="help,version,async,backup_type:,dbs:"
+OPTS_LONG="async,backup_type:,dbs:,mail:,mailfrom:,mailto:,version,help"
 OPTS=$(getopt -s bash -o '' --options $OPTS_SHORT --longoptions $OPTS_LONG -n "$0" -- "$@")
 if [[ $? -ne 0 ]] ; then
     exitWithError "Failed parsing options" -2
@@ -497,6 +613,18 @@ while true; do
         OPT_DATABASES=$2
         shift 2
         ;;
+    --mail)
+        OPT_MAIL_MODE=$2
+        shift 2
+        ;;
+    --mailfrom)
+        HBS_MAILFROM=$2
+        shift 2
+        ;;
+    --mailto)
+        HBS_MAILTO=$2
+        shift 2
+        ;;
     --version)
         showVersion
         exit 0
@@ -516,9 +644,12 @@ done
 # ---
 prepareLogFile
 
-# Start work
+# Start working
 # ---
 logInfo "$HBS_SCRIPT_NAME ($HBS_SCRIPT_VERSION) started"
+
+# Prepare mail mode
+prepareMailMode
 
 # Prepare commands for calling hdbsql
 # ---
