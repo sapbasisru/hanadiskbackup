@@ -59,14 +59,14 @@ declare HBS_LOG_FULLNAME=""
 
 # Mail notification mode:
 # - 0: none
-# - 1: mail if error
-# - 2: mail anytime
+# - 1: send e-mail if error
+# - 2: send e-mail anytime
 declare HBS_MAIL_MODE=0
 
-# Mail notification sender (from)
+# Mail notification's sender (from)
 declare HBS_MAILFROM=""
 
-# Mail notification recipients (to)
+# Mail notification's recipients (to)
 declare HBS_MAILTO=""
 
 #######################################
@@ -138,12 +138,12 @@ Options:
         Script uses the utility sendmail for mailing.
 
     --mail-from <sender>
-        Use <sender> for field "from" in the mail notification.
+        Use <sender> for field "from" in the e-mail notification.
         Example: "HANA Disk Backup Script<nobody@nobody.com>".
         Default value: none.
 
     --mail-to <recipient(s)>
-        Use <recipient(s)> for field "to" in the mail notification.
+        Use <recipient(s)> for field "to" in the e-mail notification.
         Default value: none.
 
     -U <HANA User Key from secure user store>
