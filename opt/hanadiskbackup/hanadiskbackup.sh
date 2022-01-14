@@ -119,7 +119,7 @@ Options:
     --async, -A
         Switch to asynchronous calling of the 'BACKUP DATA...' SQL-statement.
 
-    --backup_type <type-of-backup>
+    --backup-type <type-of-backup>
         Set session backup type.
         The default backup type is '${OPT_BACKUP_TYPE}'.
 
@@ -128,21 +128,21 @@ Options:
         You can use the string '%all' for backup all of databases.
         The default value is '${OPT_DATABASES}'.
 
-    --mail <mail mode>
-        Set mail notification's mode.
+    --mail-mode <mail mode>
+        Set e-mail notification's mode.
         Possible values:
         *   0 - none, 
-        *   1 - mail if error
-        *   2 - mail anytime
-        The default notofication mode is 0.
+        *   1 - send e-mail if error
+        *   2 - send e-mail anytime
+        The default notification mode is 0.
         Script uses the utility sendmail for mailing.
 
-    --mailfrom <sender>
+    --mail-from <sender>
         Use <sender> for field "from" in the mail notification.
         Example: "HANA Disk Backup Script<nobody@nobody.com>".
         Default value: none.
 
-    --mailto <recipient(s)>
+    --mail-to <recipient(s)>
         Use <recipient(s)> for field "to" in the mail notification.
         Default value: none.
 
@@ -513,10 +513,10 @@ prepareMailMode() {
     [[ $HBS_MAIL_MODE -eq 0 ]] && return
 
     [[ -z "$HBS_MAILFROM" ]] && \
-        exitWithError "The e-mail sender is not specified. Use the option \"mailfrom\""
+        exitWithError "The e-mail sender is not specified. Use the option \"mail-from\""
 
     [[ -z "$HBS_MAILTO" ]] && \
-        exitWithError "The e-mail recipient(s) is not specified. Use the option \"mailto\""
+        exitWithError "The e-mail recipient(s) is not specified. Use the option \"mail-to\""
 }
 
 #######################################
@@ -588,7 +588,7 @@ if [[ $? -ne 4 ]]; then
 fi
 
 OPTS_SHORT="U:,A"
-OPTS_LONG="async,backup_type:,dbs:,mail:,mailfrom:,mailto:,version,help"
+OPTS_LONG="async,backup-type:,dbs:,mail-mode:,mail-from:,mail-to:,version,help"
 OPTS=$(getopt -s bash -o '' --options $OPTS_SHORT --longoptions $OPTS_LONG -n "$0" -- "$@")
 if [[ $? -ne 0 ]] ; then
     exitWithError "Failed parsing options" -2
@@ -605,7 +605,7 @@ while true; do
         HBS_BACKUP_ASYNC=1
         shift 1
         ;;
-    --backup_type)
+    --backup-type)
         OPT_BACKUP_TYPE=$(echo $2 | tr '[:upper:]' '[:lower:]')
         shift 2
         ;;
@@ -613,15 +613,15 @@ while true; do
         OPT_DATABASES=$2
         shift 2
         ;;
-    --mail)
+    --mail-mode)
         OPT_MAIL_MODE=$2
         shift 2
         ;;
-    --mailfrom)
+    --mail-from)
         HBS_MAILFROM=$2
         shift 2
         ;;
-    --mailto)
+    --mail-to)
         HBS_MAILTO=$2
         shift 2
         ;;
