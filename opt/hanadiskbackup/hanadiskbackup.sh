@@ -4,7 +4,7 @@
 [[ -f $HOME/.bashrc ]] && source $HOME/.bashrc -start "echo dummy"
 
 declare HBS_SCRIPT_NAME="HANA Disk Backup Script"
-declare HBS_SCRIPT_VERSION="0.1.2"
+declare HBS_SCRIPT_VERSION="0.1.2-beta1"
 
 #######################################
 # Runtime script's variables
